@@ -2,6 +2,7 @@
 import { useThrottleFn } from '@vueuse/core'
 
 import { useBewlyApp } from '~/composables/useAppProvider'
+import { useGlobalScrollState } from '~/composables/useGlobalScrollState'
 import { OVERLAY_SCROLL_BAR_SCROLL, TOP_BAR_VISIBILITY_CHANGE } from '~/constants/globalEvents'
 import { gridLayout, settings } from '~/logic'
 import type { HomeTab } from '~/stores/mainStore'
@@ -38,6 +39,7 @@ const tabContentLoading = ref<boolean>(false)
 const currentTabs = ref<HomeTab[]>([])
 const tabPageRef = ref()
 const topBarVisibility = ref<boolean>(false)
+const { isScrolling } = useGlobalScrollState()
 
 function overlayScrollHandler(scrollTop: number) {
   cachedScrollTop = scrollTop
@@ -167,7 +169,8 @@ function toggleTabContentLoading(loading: boolean) {
           pointer-events-none
           :style="{
             backgroundImage: `url('${settings.searchPageWallpaper}')`,
-            backgroundAttachment: settings.searchPageModeWallpaperFixed ? 'fixed' : 'unset',
+            // 固定背景在滚动时会触发额外合成层更新，滚动中临时降级为 scroll 可显著降低卡顿
+            backgroundAttachment: settings.searchPageModeWallpaperFixed && !isScrolling ? 'fixed' : 'unset',
           }"
         />
         <!-- background mask -->
@@ -223,6 +226,7 @@ function toggleTabContentLoading(loading: boolean) {
         <section
           v-if="!(!settings.alwaysShowTabsOnHomePage && currentTabs.length === 1)"
           class="glass-panel"
+          :class="{ 'perf-degraded': isScrolling }"
           bg="$bew-elevated" p-1
           w="[calc(100%-280px)]" max-w="fit"
           h-38px rounded-full
@@ -259,6 +263,7 @@ function toggleTabContentLoading(loading: boolean) {
         <div
           v-if="settings.enableGridLayoutSwitcher"
           class="glass-panel"
+          :class="{ 'perf-degraded': isScrolling }"
           flex="~ gap-1 shrink-0" p-1 h-38px bg="$bew-elevated"
           ml-auto rounded-full
           shadow="[var(--bew-shadow-1),var(--bew-shadow-edge-glow-1)]"
@@ -329,6 +334,11 @@ function toggleTabContentLoading(loading: boolean) {
   contain: paint layout;
   /* 创建独立堆叠上下文，减少合成压力 */
   isolation: isolate;
+}
+
+/* 滚动中临时关闭高成本滤镜，优先保证滚动帧率 */
+.glass-panel.perf-degraded {
+  backdrop-filter: none;
 }
 
 .home-tabs-scroll {
