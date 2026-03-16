@@ -15,8 +15,8 @@ const mainStore = useMainStore()
 const { handleBackToTop, homeActivatedPage } = useBewlyApp()
 const handleThrottledBackToTop = useThrottleFn((targetScrollTop: number = 0) => handleBackToTop(targetScrollTop), 1000)
 
-// ✅ 性能优化：缓存 scrollTop 值，避免重复 DOM 读取
-const cachedScrollTop = ref(0)
+// 使用非响应式变量缓存 scrollTop，避免高频滚动触发组件更新
+let cachedScrollTop = 0
 
 // 使用全局的homeActivatedPage状态
 const activatedPage = homeActivatedPage
@@ -38,6 +38,35 @@ const tabContentLoading = ref<boolean>(false)
 const currentTabs = ref<HomeTab[]>([])
 const tabPageRef = ref()
 const topBarVisibility = ref<boolean>(false)
+
+function overlayScrollHandler(scrollTop: number) {
+  cachedScrollTop = scrollTop
+}
+
+function topBarVisibilityHandler(val: boolean) {
+  topBarVisibility.value = val
+  shouldMoveTabsUp.value = false
+
+  // Allow moving tabs up only when the top bar is not hidden & is set to auto-hide
+  // This feature is primarily designed to compatible with the Bilibili Evolved's top bar
+  // Even when the BewlyBewly top bar is hidden, the Bilibili Evolved top bar still exists, so not moving up
+  if (settings.value.autoHideTopBar && settings.value.showTopBar) {
+    if (!settings.value.useSearchPageModeOnHomePage) {
+      if (val)
+        shouldMoveTabsUp.value = false
+
+      else
+        shouldMoveTabsUp.value = true
+    }
+    else {
+      if (val)
+        shouldMoveTabsUp.value = false
+
+      else if (cachedScrollTop > 510 + 40)
+        shouldMoveTabsUp.value = true
+    }
+  }
+}
 const gridLayoutIcons = computed((): GridLayoutIcon[] => {
   return [
     { icon: 'i-mingcute:table-3-line', iconActivated: 'i-mingcute:table-3-fill', value: 'adaptive' },
@@ -73,40 +102,8 @@ function computeTabs(): HomeTab[] {
 onMounted(() => {
   showSearchPageMode.value = true
 
-  // ✅ 性能优化：订阅滚动事件以缓存 scrollTop，避免后续 DOM 读取
-  emitter.on(OVERLAY_SCROLL_BAR_SCROLL, (scrollTop: number) => {
-    cachedScrollTop.value = scrollTop
-  })
-
-  emitter.off(TOP_BAR_VISIBILITY_CHANGE)
-  emitter.on(TOP_BAR_VISIBILITY_CHANGE, (val) => {
-    topBarVisibility.value = val
-    shouldMoveTabsUp.value = false
-
-    // Allow moving tabs up only when the top bar is not hidden & is set to auto-hide
-    // This feature is primarily designed to compatible with the Bilibili Evolved's top bar
-    // Even when the BewlyBewly top bar is hidden, the Bilibili Evolved top bar still exists, so not moving up
-    if (settings.value.autoHideTopBar && settings.value.showTopBar) {
-      if (!settings.value.useSearchPageModeOnHomePage) {
-        if (val)
-          shouldMoveTabsUp.value = false
-
-        else
-          shouldMoveTabsUp.value = true
-      }
-      else {
-        // fix #349
-        // ✅ 性能优化：使用缓存的 scrollTop，避免 DOM 读取
-        const scrollTop = cachedScrollTop.value
-
-        if (val)
-          shouldMoveTabsUp.value = false
-
-        else if (scrollTop > 510 + 40)
-          shouldMoveTabsUp.value = true
-      }
-    }
-  })
+  emitter.on(OVERLAY_SCROLL_BAR_SCROLL, overlayScrollHandler)
+  emitter.on(TOP_BAR_VISIBILITY_CHANGE, topBarVisibilityHandler)
 
   currentTabs.value = computeTabs()
   activatedPage.value = currentTabs.value[0].page
@@ -115,14 +112,14 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  emitter.off(TOP_BAR_VISIBILITY_CHANGE)
-  emitter.off(OVERLAY_SCROLL_BAR_SCROLL)
+  emitter.off(TOP_BAR_VISIBILITY_CHANGE, topBarVisibilityHandler)
+  emitter.off(OVERLAY_SCROLL_BAR_SCROLL, overlayScrollHandler)
 })
 
 function handleChangeTab(tab: HomeTab) {
   if (activatedPage.value === tab.page) {
     // ✅ 性能优化：使用缓存的 scrollTop，避免 DOM 读取
-    const scrollTop = cachedScrollTop.value
+    const scrollTop = cachedScrollTop
 
     if ((!settings.value.useSearchPageModeOnHomePage && scrollTop > 0) || (settings.value.useSearchPageModeOnHomePage && scrollTop > 510)) {
       handleThrottledBackToTop(settings.value.useSearchPageModeOnHomePage ? 510 : 0)
